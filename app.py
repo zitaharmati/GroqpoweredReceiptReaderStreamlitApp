@@ -43,11 +43,36 @@ def convert_dfs_to_excel(dfs_dict):
 st.title("🧾 Receipt Data Extractor (Groq-powered)")
 
 with st.sidebar:
-    api_key = st.text_input("🔑 Enter your Groq API Key", type="password")
-    st.caption("Your key should start with 'gsk_' and be valid for Groq API access.")
+    st.markdown("""
+    <div style="background-color: #f8f0f5; padding: 15px; border-radius: 10px; border: 1px solid #e0cfe3;">
+        <h4 style="color: #d6336c;">📘 App Usage Guide</h4>
+        <ol style="padding-left: 20px; color: #333;">
+            <li>📸 Take a good quality photo of the receipt</li>
+            <li>✂️ Crop the receipt to remove background clutter</li>
+            <li>🔑 Insert your Groq API key</li>
+            <li>📤 Upload your photo</li>
+            <li>🔢 If extraction is not correct:</li>
+                <ul style="padding-left: 20px; margin-top: 5px;">
+                <li>Try adding the expected number of items</li>
+                <li>Upload a clearer or better-cropped photo</li>
+                </ul>
+            <li>📥 Download items list and summary as Excel files</li>
+        </ol>
+    </div>
+    """, unsafe_allow_html=True)
 
-image_file = st.file_uploader("📤 Upload a receipt image \n Make sure your photo is clear and the receipt is well-cropped", type=["jpg", "jpeg", "png"])
-expected_items = st.number_input("🔢 Expected number of items (optional, if data extraction is not correct)", min_value=0, step=1)
+st.markdown('<p style="font-size:1.3rem; font-weight:bold;">🔑 Enter your Groq API Key</p>', unsafe_allow_html=True)
+api_key = st.text_input("", type="password")
+st.caption("Your key should start with 'gsk_' and be valid for Groq API access.")
+
+st.markdown('<p style="font-size:1.3rem; font-weight:bold;"></p>', unsafe_allow_html=True)
+st.markdown('<p style="font-size:1.3rem; font-weight:bold;">📤 Upload a receipt image - Make sure your photo is clear and the receipt is well-cropped</p>', unsafe_allow_html=True)
+
+image_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
+st.markdown('<p style="font-size:1.3rem; font-weight:bold;"></p>', unsafe_allow_html=True)
+st.markdown('<p style="font-size:1.3rem; font-weight:bold;">🔢 Expected number of items (optional, if data extraction is not correct)</p>', unsafe_allow_html=True)
+
+expected_items = st.number_input("", min_value=0, step=1)
 
 if image_file and api_key:
     
