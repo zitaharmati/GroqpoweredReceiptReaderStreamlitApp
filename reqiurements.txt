@@ -6,3 +6,4 @@ xlsxwriter==3.2.5
 ipython>=7.0.0,<8.0.0
 setuptools==75.1.0
 groq>=0.29.0
+groq-sdk
