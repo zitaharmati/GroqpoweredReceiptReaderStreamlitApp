@@ -25,18 +25,64 @@ def convert_df_to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=True, sheet_name='Sheet1')
-        writer._save()
     processed_data = output.getvalue()
     return processed_data
 
-def convert_dfs_to_excel(dfs_dict):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        for sheet_name, df in dfs_dict.items():
-            df.to_excel(writer, index=True, sheet_name=sheet_name)
-        writer._save()
-    processed_data = output.getvalue()
-    return processed_data
+# def convert_dfs_to_excel(dfs_dict):
+#     output = BytesIO()
+#     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+#         for sheet_name, df in dfs_dict.items():
+#             df.to_excel(writer, index=True, sheet_name=sheet_name)
+#     processed_data = output.getvalue()
+#     return processed_data
+
+@st.cache_data(show_spinner="🔍 Processing receipt...", ttl=3600)
+def process_receipt(image_bytes, api_key, expected_items):
+
+    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+    prompt_text = """Extract the following receipt details from the provided text response and return them as a structured JSON object. Return only JSON, no extra text or explanations
+
+    Fields to extract:
+    - Company
+    - Date
+    - Items (Description, Quantity, Unit Price, Total)
+    - Deduction 
+    - Total
+    - ProductType one of the following categories: food, alcoholic drink, petrol, drugstore product, cloth, electric device, medicine, other. If not identified use "unknown".
+    """
+    if expected_items > 0:
+        prompt_text += f"""
+    IMPORTANT: There are exactly {expected_items} items in the receipt. 
+    Do not infer or hallucinate additional items. 
+    Return exactly {expected_items} items in the 'Items' field of the JSON.
+    """
+
+    client = Groq(api_key=api_key)
+    response = client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                        },
+                    },
+                ],
+            }
+        ],
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+    )
+
+    result_str = response.choices[0].message.content
+    match = re.search(r'\{.*\}', result_str, re.DOTALL)
+    if not match:
+        raise ValueError("No valid JSON found in model response.")
+
+    result_json = json.loads(match.group(0))
+    return result_json
 
 
 # --- UI ---
@@ -62,130 +108,61 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 st.markdown('<p style="font-size:1.3rem; font-weight:bold;">🔑 Enter your Groq API Key</p>', unsafe_allow_html=True)
-api_key = st.text_input("", type="password")
+api_key = st.text_input("Groq API Key", type="password", label_visibility="collapsed")
 st.caption("Your key should start with 'gsk_' and be valid for Groq API access.")
 
 st.markdown('<p style="font-size:1.3rem; font-weight:bold;"></p>', unsafe_allow_html=True)
 st.markdown('<p style="font-size:1.3rem; font-weight:bold;">📤 Upload a receipt image - Make sure your photo is clear and the receipt is well-cropped</p>', unsafe_allow_html=True)
 
-image_file = st.file_uploader("", type=["jpg", "jpeg", "png"])
+image_file = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
 st.markdown('<p style="font-size:1.3rem; font-weight:bold;"></p>', unsafe_allow_html=True)
 st.markdown('<p style="font-size:1.3rem; font-weight:bold;">🔢 Expected number of items (optional, if data extraction is not correct)</p>', unsafe_allow_html=True)
 
-expected_items = st.number_input("", min_value=0, step=1)
+expected_items = st.number_input("Expected Items", min_value=0, step=1, label_visibility="collapsed")
 
 if image_file and api_key:
-    
     st.image(image_file, caption="Uploaded Receipt", use_container_width=True)
-    
+
     try:
+        image_bytes = image_file.read()
+        result_json = process_receipt(image_bytes, api_key, expected_items)
 
-        # Encode image
-        base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+        items_df = pd.DataFrame(result_json["Items"])
+        total_without_discount = items_df["Total"].sum()
+        summary_df = pd.DataFrame([{
+            "Company": result_json.get("Company", "Unknown"),
+            "Date": result_json.get("Date", "Unknown"),
+            "Discount": total_without_discount - result_json["Total"],
+            "Total": result_json.get("Total", "Unknown"),
+        }])
 
-        # Build prompt
-        prompt_text = """Extract the following receipt details from the provided text response and return them as a structured JSON object. Return only JSON, no extra text or explanations
+        # Display and download logic remains unchanged
+        st.subheader("📋 Summary")
+        st.dataframe(summary_df)
+        st.download_button(
+            label="Download summary as Excel",
+            data=convert_df_to_excel(summary_df),
+            file_name='summary.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-        Fields to extract:
-        - Company
-        - Date
-        - Items (Description, Quantity, Unit Price, Total)
-        - Deduction 
-        - Total
-        - ProductType one of the following categories: food, alcoholic drink, petrol, drugstore product, cloth, electric device, medicine, other. If not identified use "unknown".
-        """
-        if expected_items > 0:
-            prompt_text += f"""
-        IMPORTANT: There are exactly {expected_items} items in the receipt. 
-        Do not infer or hallucinate additional items. 
-        Return exactly {expected_items} items in the 'Items' field of the JSON.
-        """
+        st.subheader("🛒 Items")
+        st.dataframe(items_df)
+        try:
+            grouped = items_df.groupby("ProductType")["Total"].sum().reset_index()
+            st.subheader("📊 Total by Product Type")
+            st.dataframe(grouped)
+            st.bar_chart(grouped.set_index("ProductType"))
+        except Exception:
+            st.warning("⚠️ Could not generate chart by Product type")
 
-        # Call Groq model
-        client = Groq(api_key=api_key)
-        response = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                            },
-                        },
-                    ],
-                }
-            ],
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-        )
+        st.download_button(
+            label="Download items as Excel",
+            data=convert_df_to_excel(items_df),
+            file_name='items.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-        # Extract and clean JSON from response
-        result_str = response.choices[0].message.content
-
-        match = re.search(r'\{.*\}', result_str, re.DOTALL)
-        if not match:
-            st.error(" No valid JSON found in model response.")
-        else:
-            try:
-                result_json = json.loads(match.group(0))
-            
-                # Create DataFrames
-                items_df = pd.DataFrame(result_json["Items"])
-                total_without_discount = items_df["Total"].sum()
-                summary_df = pd.DataFrame([{
-                    #"Company": result_json["Company"],
-                    "Company":result_json.get("Company", "Unknown"),
-                    "Date": result_json.get("Date", "Unknown"),
-                    "Discount":  total_without_discount - result_json["Total"],
-                    "Total": result_json.get("Total", "Unknown"),
-                }])
-
-
-                st.subheader("📋 Summary")
-                st.dataframe(summary_df)
-
-                excel_summary = convert_df_to_excel(summary_df)
-                st.download_button(
-                label="Download summary as Excel",
-                data=excel_summary,
-                file_name='summary.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-                st.subheader("🛒 Items")
-                st.dataframe(items_df)
-                try:
-                    grouped = items_df.groupby("ProductType")["Total"].sum().reset_index()
-                    st.subheader("📊 Total by Product Type")
-                    st.dataframe(grouped)
-
-                    st.bar_chart(grouped.set_index("ProductType"))
-                except Exception as e:
-                    st.warning(f"⚠️ Could not generate chart by Product type")
-                    pass
-                
-                excel_items = convert_df_to_excel(items_df)
-                st.download_button(
-                label="Download items as Excel",
-                data=excel_items,
-                file_name='items.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-           
-            
-            except json.JSONDecodeError as e:
-                st.error(f"Data transformation failed: your receipt was read as follows. Please upload another picture!")
-                st.code(match.group(0), language="json")
-
-        
     except AuthenticationError:
         st.error("🚫 Invalid API key. Please check your Groq key and try again.")
         st.stop()
-
-    except ValueError:
-        st.error("🚫 Items or total cost information is missing. Please upload another picture, pay attention to the quality!")
-        st.stop()
-
-    except TypeError:
-        st.error("🚫 Items or total cost information is missing. Please upload another picture, pay attention to the quality!")
-        st.stop()
+    except (ValueError, TypeError, json.JSONDecodeError) as e:
+        st.error("🚫 Receipt processing failed. Please upload a clearer image.")
