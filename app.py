@@ -28,14 +28,6 @@ def convert_df_to_excel(df):
     processed_data = output.getvalue()
     return processed_data
 
-# def convert_dfs_to_excel(dfs_dict):
-#     output = BytesIO()
-#     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-#         for sheet_name, df in dfs_dict.items():
-#             df.to_excel(writer, index=True, sheet_name=sheet_name)
-#     processed_data = output.getvalue()
-#     return processed_data
-
 @st.cache_data(show_spinner="🔍 Processing receipt...", ttl=3600)
 def process_receipt(image_bytes, api_key, expected_items):
 
