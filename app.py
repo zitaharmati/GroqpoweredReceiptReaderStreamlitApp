@@ -34,14 +34,18 @@ def process_receipt(image_bytes, api_key, expected_items):
     base64_image = base64.b64encode(image_bytes).decode('utf-8')
     prompt_text = """Extract the following receipt details from the provided text response and return them as a structured JSON object. Return only JSON, no extra text or explanations
 
-    Fields to extract:
+   Fields to extract:
     - Company
     - Date
-    - Items (Description, Quantity, Unit Price, Total)
+    - Items (Description, Quantity, Unit Price, Total, Discounted total)
     - Deduction 
     - Total
-    - ProductType one of the following categories: food, alcoholic drink, petrol, drugstore product, cloth, electric device, medicine, other. If not identified use "unknown".
+    - Discounted Total
+    - ProductType one of the following categories: food, alcoholic drink, paper product, toy, book, stationery, home decoration, DIY product, gardening, petrol, drugstore product, cloth, electric device, medicine, other. If not identified use "unknown".
+    If the receipt contains discount try to extract the discounted price of the certain product as discounted total.
+    The name of the product item is before the price of that item.
     """
+
     if expected_items > 0:
         prompt_text += f"""
     IMPORTANT: There are exactly {expected_items} items in the receipt. 
@@ -122,11 +126,11 @@ if image_file and api_key:
         items_df = pd.DataFrame(result_json["Items"])
         total_without_discount = items_df["Total"].sum()
         summary_df = pd.DataFrame([{
-            "Company": result_json.get("Company", "Unknown"),
-            "Date": result_json.get("Date", "Unknown"),
-            "Discount": total_without_discount - result_json["Total"],
-            "Total": result_json.get("Total", "Unknown"),
-        }])
+                "Company": result_json.get("Company", "Unknown"),
+                "Date": result_json.get("Date", "Unknown"),
+                "Discount" : result_json.get("Deduction", 0),
+                "Total": result_json.get("Total", "Unknown") 
+            }])
 
         # Display and download logic remains unchanged
         st.subheader("📋 Summary")
@@ -140,10 +144,16 @@ if image_file and api_key:
         st.subheader("🛒 Items")
         st.dataframe(items_df)
         try:
-            grouped = items_df.groupby("ProductType")["Total"].sum().reset_index()
-            st.subheader("📊 Total by Product Type")
-            st.dataframe(grouped)
-            st.bar_chart(grouped.set_index("ProductType"))
+            if summary_df["Discount"].values == 0:
+                grouped = items_df.groupby("ProductType")["Total"].sum().reset_index()
+                st.subheader("📊 Termékkategóriák szerinti bontás")
+                st.dataframe(grouped)
+                st.bar_chart(grouped.set_index("ProductType"))
+            else:
+                grouped = items_df.groupby("ProductType")["Discounted Total"].sum().reset_index()
+                st.subheader("📊 Termékkategóriák szerinti bontás")
+                st.dataframe(grouped)
+                st.bar_chart(grouped.set_index("ProductType"))
         except Exception:
             st.warning("⚠️ Could not generate chart by Product type")
 
